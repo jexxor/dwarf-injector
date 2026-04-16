@@ -141,109 +141,212 @@ def expect_arg_count(mnemonic: str, args: list[str], expected: int, asm_path: st
         )
 
 
+def parse_instruction(raw: str) -> tuple[str, list[str]] | None:
+    line = strip_comment(raw)
+    if not line:
+        return None
+    if line.endswith(":"):
+        # Labels are accepted as no-ops for readability, but not resolved for branches.
+        return None
+    normalized = line.replace(",", " ")
+    parts = normalized.split()
+    return parts[0].lower(), parts[1:]
+
+
+def encode_compact_lit_instruction(
+    mnemonic: str,
+    args: list[str],
+    asm_path: str,
+    line_no: int,
+) -> bytes | None:
+    lit_match = LIT_MNEMONIC_RE.match(mnemonic)
+    if not lit_match:
+        return None
+    expect_arg_count(mnemonic, args, 0, asm_path, line_no)
+    return bytes((0x30 + int(lit_match.group(1)),))
+
+
+def encode_noarg_instruction(
+    mnemonic: str,
+    args: list[str],
+    asm_path: str,
+    line_no: int,
+) -> bytes | None:
+    opcode = NOARG_OPS.get(mnemonic)
+    if opcode is None:
+        return None
+    expect_arg_count(mnemonic, args, 0, asm_path, line_no)
+    return bytes((opcode,))
+
+
+def encode_u8_instruction(
+    mnemonic: str,
+    args: list[str],
+    asm_path: str,
+    line_no: int,
+) -> bytes | None:
+    opcode = U8_ARG_OPS.get(mnemonic)
+    if opcode is None:
+        return None
+    expect_arg_count(mnemonic, args, 1, asm_path, line_no)
+    value = parse_int(args[0], asm_path, line_no)
+    if value < 0 or value > 0xFF:
+        raise ValueError(f"{asm_path}:{line_no}: {mnemonic} operand must fit u8")
+    return bytes((opcode, value))
+
+
+def encode_uleb_instruction(
+    mnemonic: str,
+    args: list[str],
+    asm_path: str,
+    line_no: int,
+) -> bytes | None:
+    opcode = ULEB_ARG_OPS.get(mnemonic)
+    if opcode is None:
+        return None
+    expect_arg_count(mnemonic, args, 1, asm_path, line_no)
+    value = parse_int(args[0], asm_path, line_no)
+    if value < 0:
+        raise ValueError(f"{asm_path}:{line_no}: {mnemonic} operand must be non-negative")
+    return bytes((opcode,)) + encode_uleb128(value)
+
+
+def encode_sleb_instruction(
+    mnemonic: str,
+    args: list[str],
+    asm_path: str,
+    line_no: int,
+) -> bytes | None:
+    opcode = SLEB_ARG_OPS.get(mnemonic)
+    if opcode is None:
+        return None
+    expect_arg_count(mnemonic, args, 1, asm_path, line_no)
+    value = parse_int(args[0], asm_path, line_no)
+    return bytes((opcode,)) + encode_sleb128(value)
+
+
+def encode_branch_instruction(
+    mnemonic: str,
+    args: list[str],
+    asm_path: str,
+    line_no: int,
+) -> bytes | None:
+    opcode = BRANCH_OPS.get(mnemonic)
+    if opcode is None:
+        return None
+    expect_arg_count(mnemonic, args, 1, asm_path, line_no)
+    value = parse_int(args[0], asm_path, line_no)
+    if value < -32768 or value > 32767:
+        raise ValueError(f"{asm_path}:{line_no}: {mnemonic} operand must fit int16")
+    return bytes((opcode,)) + struct.pack("<h", value)
+
+
+def encode_const_instruction(
+    mnemonic: str,
+    args: list[str],
+    asm_path: str,
+    line_no: int,
+) -> bytes | None:
+    if mnemonic != "const":
+        return None
+    expect_arg_count(mnemonic, args, 1, asm_path, line_no)
+    encoded = bytearray()
+    emit_const(encoded, parse_int(args[0], asm_path, line_no))
+    return bytes(encoded)
+
+
+def encode_lit_instruction(
+    mnemonic: str,
+    args: list[str],
+    asm_path: str,
+    line_no: int,
+) -> bytes | None:
+    if mnemonic != "lit":
+        return None
+    expect_arg_count(mnemonic, args, 1, asm_path, line_no)
+    value = parse_int(args[0], asm_path, line_no)
+    if value < 0 or value > 31:
+        raise ValueError(f"{asm_path}:{line_no}: lit operand must be in range 0..31")
+    return bytes((0x30 + value,))
+
+
+def encode_addr_instruction(
+    mnemonic: str,
+    args: list[str],
+    asm_path: str,
+    line_no: int,
+) -> bytes | None:
+    if mnemonic != "addr":
+        return None
+    expect_arg_count(mnemonic, args, 1, asm_path, line_no)
+    value = parse_int(args[0], asm_path, line_no)
+    if value < 0 or value > 0xFFFFFFFFFFFFFFFF:
+        raise ValueError(f"{asm_path}:{line_no}: addr operand must fit u64")
+    return bytes((0x03,)) + value.to_bytes(8, "little")
+
+
+def encode_load64_instruction(
+    mnemonic: str,
+    args: list[str],
+    asm_path: str,
+    line_no: int,
+) -> bytes | None:
+    if mnemonic != "load64":
+        return None
+    expect_arg_count(mnemonic, args, 1, asm_path, line_no)
+    value = parse_int(args[0], asm_path, line_no)
+    return bytes((0x7C,)) + encode_sleb128(value) + bytes((0x94, 0x08))
+
+
+def encode_byte_instruction(
+    mnemonic: str,
+    args: list[str],
+    asm_path: str,
+    line_no: int,
+) -> bytes | None:
+    if mnemonic != "byte":
+        return None
+    expect_arg_count(mnemonic, args, 1, asm_path, line_no)
+    value = parse_int(args[0], asm_path, line_no)
+    if value < 0 or value > 0xFF:
+        raise ValueError(f"{asm_path}:{line_no}: byte operand must fit u8")
+    return bytes((value,))
+
+
+INSTRUCTION_ENCODERS = (
+    encode_compact_lit_instruction,
+    encode_noarg_instruction,
+    encode_u8_instruction,
+    encode_uleb_instruction,
+    encode_sleb_instruction,
+    encode_branch_instruction,
+    encode_const_instruction,
+    encode_lit_instruction,
+    encode_addr_instruction,
+    encode_load64_instruction,
+    encode_byte_instruction,
+)
+
+
+def assemble_instruction(mnemonic: str, args: list[str], asm_path: str, line_no: int) -> bytes:
+    for encoder in INSTRUCTION_ENCODERS:
+        encoded = encoder(mnemonic, args, asm_path, line_no)
+        if encoded is not None:
+            return encoded
+    raise ValueError(f"{asm_path}:{line_no}: unsupported instruction '{mnemonic}'")
+
+
 def assemble_asm_file(asm_path: str) -> bytes:
     with open(asm_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
     code = bytearray()
-
     for line_no, raw in enumerate(lines, start=1):
-        line = strip_comment(raw)
-        if not line:
+        parsed = parse_instruction(raw)
+        if parsed is None:
             continue
-
-        if line.endswith(":"):
-            # Labels are accepted as no-ops for readability, but not resolved for branches.
-            continue
-
-        normalized = line.replace(",", " ")
-        parts = normalized.split()
-        mnemonic = parts[0].lower()
-        args = parts[1:]
-
-        lit_match = LIT_MNEMONIC_RE.match(mnemonic)
-        if lit_match:
-            expect_arg_count(mnemonic, args, 0, asm_path, line_no)
-            code.append(0x30 + int(lit_match.group(1)))
-            continue
-
-        if mnemonic in NOARG_OPS:
-            expect_arg_count(mnemonic, args, 0, asm_path, line_no)
-            code.append(NOARG_OPS[mnemonic])
-            continue
-
-        if mnemonic in U8_ARG_OPS:
-            expect_arg_count(mnemonic, args, 1, asm_path, line_no)
-            value = parse_int(args[0], asm_path, line_no)
-            if value < 0 or value > 0xFF:
-                raise ValueError(f"{asm_path}:{line_no}: {mnemonic} operand must fit u8")
-            code.extend((U8_ARG_OPS[mnemonic], value))
-            continue
-
-        if mnemonic in ULEB_ARG_OPS:
-            expect_arg_count(mnemonic, args, 1, asm_path, line_no)
-            value = parse_int(args[0], asm_path, line_no)
-            if value < 0:
-                raise ValueError(f"{asm_path}:{line_no}: {mnemonic} operand must be non-negative")
-            code.append(ULEB_ARG_OPS[mnemonic])
-            code.extend(encode_uleb128(value))
-            continue
-
-        if mnemonic in SLEB_ARG_OPS:
-            expect_arg_count(mnemonic, args, 1, asm_path, line_no)
-            value = parse_int(args[0], asm_path, line_no)
-            code.append(SLEB_ARG_OPS[mnemonic])
-            code.extend(encode_sleb128(value))
-            continue
-
-        if mnemonic in BRANCH_OPS:
-            expect_arg_count(mnemonic, args, 1, asm_path, line_no)
-            value = parse_int(args[0], asm_path, line_no)
-            if value < -32768 or value > 32767:
-                raise ValueError(f"{asm_path}:{line_no}: {mnemonic} operand must fit int16")
-            code.append(BRANCH_OPS[mnemonic])
-            code.extend(struct.pack("<h", value))
-            continue
-
-        if mnemonic == "const":
-            expect_arg_count(mnemonic, args, 1, asm_path, line_no)
-            emit_const(code, parse_int(args[0], asm_path, line_no))
-            continue
-
-        if mnemonic == "lit":
-            expect_arg_count(mnemonic, args, 1, asm_path, line_no)
-            value = parse_int(args[0], asm_path, line_no)
-            if value < 0 or value > 31:
-                raise ValueError(f"{asm_path}:{line_no}: lit operand must be in range 0..31")
-            code.append(0x30 + value)
-            continue
-
-        if mnemonic == "addr":
-            expect_arg_count(mnemonic, args, 1, asm_path, line_no)
-            value = parse_int(args[0], asm_path, line_no)
-            if value < 0 or value > 0xFFFFFFFFFFFFFFFF:
-                raise ValueError(f"{asm_path}:{line_no}: addr operand must fit u64")
-            code.append(0x03)  # DW_OP_addr
-            code.extend(value.to_bytes(8, "little"))
-            continue
-
-        if mnemonic == "load64":
-            expect_arg_count(mnemonic, args, 1, asm_path, line_no)
-            value = parse_int(args[0], asm_path, line_no)
-            code.append(0x7C)  # DW_OP_breg12
-            code.extend(encode_sleb128(value))
-            code.extend((0x94, 0x08))  # DW_OP_deref_size 8
-            continue
-
-        if mnemonic == "byte":
-            expect_arg_count(mnemonic, args, 1, asm_path, line_no)
-            value = parse_int(args[0], asm_path, line_no)
-            if value < 0 or value > 0xFF:
-                raise ValueError(f"{asm_path}:{line_no}: byte operand must fit u8")
-            code.append(value)
-            continue
-
-        raise ValueError(f"{asm_path}:{line_no}: unsupported instruction '{mnemonic}'")
+        mnemonic, args = parsed
+        code.extend(assemble_instruction(mnemonic, args, asm_path, line_no))
 
     if not code:
         raise ValueError(f"{asm_path}: assembled payload is empty")
@@ -467,7 +570,7 @@ def patch_binary(
 
     elf = ELFFile(io.BytesIO(data))
     patch_at, total_stubs = locate_blob(data, elf, placeholder_cfi, stub_index)
-    data[patch_at : patch_at + len(placeholder_cfi)] = patched_cfi
+    data[patch_at: patch_at + len(placeholder_cfi)] = patched_cfi
 
     with open(output_path, "wb") as f:
         f.write(data)
