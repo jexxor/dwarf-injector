@@ -38,6 +38,20 @@ Requirements:
 - g++
 - pyelftools (`pip install pyelftools`)
 
+## Tested environment
+
+The current implementation was validated on the following baseline:
+
+- OS: Arch Linux (rolling), x86-64
+- Kernel: Linux 6.19.11-arch1-1
+- Compiler: g++ (GCC) 15.2.1 (20260209)
+
+Default build flags used by the patcher:
+
+```bash
+g++ -O0 -fno-omit-frame-pointer -g -std=c++20
+```
+
 Run:
 
 ```bash
