@@ -63,7 +63,7 @@ Common options:
 - `--expr-asm`: path to ASM expression file (default `./example/example_asm.asm`)
 - `--source`: C++ source, e.g. `X.cpp` (default `./example/example.cpp`)
 - `--preprocessed`: generated source path (default `X.preprocessed.cpp`)
-- `--input` / `--binary`: intermediate binary path (default `X`)
+- `--input`: intermediate binary path (default `X`)
 - `--output`: patched binary path (default `X_patched`)
 - `--build-cmd`: custom build command template with `{source}`, `{preprocessed}`, and `{binary}` placeholders
 - `--trigger-function`: unwind trigger function name for auto-injection (default `SecretUnwindTrigger`)

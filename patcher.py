@@ -14,12 +14,6 @@ from elftools.elf.elffile import ELFFile
 PROJECT_NAME = "dwarf-injector"
 PRIMARY_STUB_BEGIN_MARKER = "// DWARF_INJECTOR_STUB_BEGIN"
 PRIMARY_STUB_END_MARKER = "// DWARF_INJECTOR_STUB_END"
-LEGACY_STUB_BEGIN_MARKER = "// DWARFER_STUB_BEGIN"
-LEGACY_STUB_END_MARKER = "// DWARFER_STUB_END"
-STUB_MARKER_PAIRS = (
-    (PRIMARY_STUB_BEGIN_MARKER, PRIMARY_STUB_END_MARKER),
-    (LEGACY_STUB_BEGIN_MARKER, LEGACY_STUB_END_MARKER),
-)
 DEFAULT_TRIGGER_FUNCTION = "SecretUnwindTrigger"
 STUB_MACRO_NAME = "DWARF_BOOL_STUB"
 
@@ -300,19 +294,18 @@ def upsert_stub_macro(source: str, cfi_text: str) -> str:
         f"{PRIMARY_STUB_END_MARKER}\n"
     )
 
-    for begin_marker, end_marker in STUB_MARKER_PAIRS:
-        pattern = re.compile(
-            rf"({re.escape(begin_marker)}\n)(.*?)(\n{re.escape(end_marker)})",
-            re.DOTALL,
+    pattern = re.compile(
+        rf"({re.escape(PRIMARY_STUB_BEGIN_MARKER)}\n)(.*?)(\n{re.escape(PRIMARY_STUB_END_MARKER)})",
+        re.DOTALL,
+    )
+    matches = list(pattern.finditer(source))
+    if len(matches) > 1:
+        raise RuntimeError(
+            "Found multiple stub marker blocks. "
+            f"Keep only one of {PRIMARY_STUB_BEGIN_MARKER} ... {PRIMARY_STUB_END_MARKER}."
         )
-        matches = list(pattern.finditer(source))
-        if len(matches) > 1:
-            raise RuntimeError(
-                "Found multiple stub marker blocks. "
-                f"Keep only one of {begin_marker} ... {end_marker}."
-            )
-        if len(matches) == 1:
-            return pattern.sub(lambda m: m.group(1) + generated_body + m.group(3), source, count=1)
+    if len(matches) == 1:
+        return pattern.sub(lambda m: m.group(1) + generated_body + m.group(3), source, count=1)
 
     macro_pattern = re.compile(rf"(?m)^[ \t]*#define[ \t]+{re.escape(STUB_MACRO_NAME)}[^\n]*$")
     macro_matches = list(macro_pattern.finditer(source))
@@ -513,7 +506,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--input",
-        "--binary",
         dest="input_binary",
         default=None,
         help="Path to intermediate binary built from preprocessed source (default: X)",
