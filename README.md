@@ -9,6 +9,10 @@ This repository is a proof of concept for research and CTF-style experimentation
 - Incorrect DWARF expressions can crash the process during unwind.
 - Do not use this approach in production systems.
 
+## ASM ISA documentation
+
+Instruction set and syntax are documented in [ISA.md](ISA.md).
+
 ## What it does
 
 The toolchain injects a DWARF expression into a function FDE in `.eh_frame`.
@@ -84,10 +88,6 @@ Common options:
 - `--stub-align`: stub size alignment (default `1`, meaning exact fit)
 - `--max-padding`: safety limit for NOP padding (default `8`)
 - `--stub-index`: choose which matching stub to patch if multiple are present
-
-## ASM ISA documentation
-
-Instruction set and syntax are documented in [ISA.md](ISA.md).
 
 ## Repository layout
 
